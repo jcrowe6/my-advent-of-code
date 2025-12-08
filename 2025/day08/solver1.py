@@ -1,13 +1,12 @@
 import sys
 from time import time
 import numpy as np
-from scipy.spatial import KDTree
+from scipy.spatial import distance_matrix
 
 input_filename = sys.argv[1]
 
-# should use kd tree for getting dists
+# hmm
 coords = []
-
 with open(input_filename) as f:
     for line in f.readlines():
         c = tuple(map(float, line.strip().split(",")))
@@ -53,6 +52,15 @@ class Circuits:
             self.idx_to_group[i2] = new_id
             self.group_to_idxs[new_id] = set([i1, i2])
 
+    def indexes_in_same_circuit(self, idx1, idx2):
+        group1 = self.idx_to_group.get(idx1)
+        group2 = self.idx_to_group.get(idx2)
+        if group1 is None or group2 is None:
+            return False
+        if group1 == group2:
+            return True
+        return False
+
     def is_index_in_circuit(self, i):
         return self.idx_to_group.get(i) is not None
 
@@ -63,60 +71,36 @@ class Circuits:
         return group_id
 
 
-# for a given index in coord_mtx
-# returns the index of the nearest neighbor that's valid and it's dist
-def nearest_valid_neighbor(kdtree: KDTree, circuits: Circuits, idx):
-    coord = coord_mtx[idx]
-    dists, nbr_idxs = kdtree.query(
-        coord, k=1000
-    )  # may not need this many options, may need more...
-    dists = dists[1:]  # first elem will always be this index itself
-    nbr_idxs = nbr_idxs[1:]
-    idx_groupid = circuits.get_indexs_circuit_group_id(idx)
-    for dist, nbr_i in zip(
-        dists, nbr_idxs
-    ):  # go through neighbors in increasing order of distance
-        # only not valid if we're already in the same circuit together
-        if (
-            idx_groupid is not None
-            and idx_groupid == circuits.get_indexs_circuit_group_id(nbr_i)
-        ):
-            # print(f"Skipping min pair {idx, nbr_i}")
-            continue
-        # valid pairing!
-        return dist, nbr_i
-    raise Exception(f"No valid pairing found in {len(dists)} neighbors")
-
-
-# O(n) with kd_tree vs n^2
-def get_min_dist_valid_idx_pair(kdtree: KDTree, circuits: Circuits):
-    min_dist = None
-    min_idx_pair = None
-    for idx in range(kdtree.n):
-        dist, nbr_idx = nearest_valid_neighbor(kdtree, circuits, idx)
-        if min_dist is None or dist < min_dist:
-            min_dist = dist
-            min_idx_pair = (idx, nbr_idx)
-    return min_idx_pair
-
-
 st = time()
 
-kdtree = KDTree(coord_mtx)
 circuits = Circuits()
 
-for _ in range(1000 - 1):
-    idx1, idx2 = get_min_dist_valid_idx_pair(kdtree, circuits)
-    # print(idx1, idx2)
-    circuits.connect(idx1, idx2)
-    # print(circuits.group_to_idxs)
+dist_matrix = distance_matrix(coord_mtx, coord_mtx)
+all_pair_dists = []
+for i in range(len(coord_mtx) - 1):
+    for j in range(i + 1, len(coord_mtx)):
+        all_pair_dists.append((dist_matrix[i, j], i, j))
+
+all_pair_dists.sort(key=lambda x: x[0])
+
+# Annoyingly the question as written made me think we need
+# 1000 ACTUAL connections - this is not what they want,
+# they want 1000 connection attempts, regardless of whether it gets skipped or not
+max_connection_attempts = 1000
+n_connect_attempts = 0
+for dist, idx1, idx2 in all_pair_dists:  # getting pairs in increasing order of distance
+    if not circuits.indexes_in_same_circuit(idx1, idx2):
+        circuits.connect(idx1, idx2)
+        # print(f"{idx1} - {idx2}")
+        # print(circuits.group_to_idxs)
+        # print("")
+    n_connect_attempts += 1
+    if n_connect_attempts == max_connection_attempts:
+        break
 
 group_sizes = list(map(len, circuits.group_to_idxs.values()))
-group_sizes.sort()
-print(group_sizes)
-top3 = group_sizes[-3:]
-solution = 1
-for v in top3:
-    solution *= v
+group_sizes.sort(reverse=True)
+v1, v2, v3 = group_sizes[:3]
+solution = v1 * v2 * v3
 print(solution)
 print(f"{(time() - st):.4f}s")
